@@ -1,5 +1,7 @@
 let allDataCache = [];
 let SQL = null;
+const container = document.getElementById("container")
+
 async function getSqlEngine() {
 	if (!SQL) SQL = await initSqlJs({ locateFile: f => `./sql/${f}` });
 	return SQL;
@@ -7,10 +9,22 @@ async function getSqlEngine() {
 
 async function loadEntriesFromDb() {
 	const engine = await getSqlEngine();
-	const res = await fetch('https://jlzt-39e15.web.app/public.db');
-	if (!res.ok) throw new Error(`HTTP error! ${res.status}`);
-	const buf = await res.arrayBuffer();
-	const db = new engine.Database(new Uint8Array(buf));
+	let db
+	try {
+		const res = await fetch('https://jlzt-39e15.web.app/public.db');
+		if (!res.ok) throw new Error(`HTTP error! ${res.status}`);
+		const buf = await res.arrayBuffer();
+		db = new engine.Database(new Uint8Array(buf));
+	} catch (err) {
+		container.appendChild(createContent(
+			{"title":"error",
+			"content":"failed to fetch database, uh oh! Maybe it's my problem, idk...",
+			"tags":["error", "problems", "HALP"]
+			}, "ERROR"));
+
+		console.error('db load failed:', err);
+        return null;
+	}
 
 	const notesStmt = db.prepare('SELECT id, title, content, created_date FROM notes ORDER BY id DESC');
 	const notes = [];
@@ -32,15 +46,28 @@ async function loadEntriesFromDb() {
 	return notes;
 }
 
-function resolveEscapeBlocks(html) {
+const PUBLIC_HOSTS = ['jlzt-39e15.web.app', 'jlzt-39e15.firebaseapp.com']; // add jlzt.org if it points at the deploy
+const DEFAULT_MODE = PUBLIC_HOSTS.includes(location.hostname) ? 'public' : 'local';
+
+function localizePublicPaths(html) {
+  return html.replace(/<[a-z][^>]*>/gi, tag =>
+    HAS_PUBLIC_CLASS.test(tag)
+      ? tag.replace(ROOT_REL_ATTR, (_, pre) => pre + LOCAL_PUBLIC_ROOT + '/')
+      : tag
+  );
+};
+
+function resolveEscapeBlocks(html, mode = DEFAULT_MODE) {
+  html = html.replace(/\/sb\//g, ' ');
   return html.replace(/\[\[([\s\S]*?)\]\]/g, (_, inner) => {
-    return inner
+    const out = inner
       .replace(/&amp;/g, '&')
       .replace(/&lt;/g,  '<')
       .replace(/&gt;/g,  '>')
       .replace(/&nbsp;/g, ' ');
-  }).replace(/\/sb\//g, ' ');;
-};
+    return mode === 'local' ? localizePublicPaths(out) : out;
+  });
+}
 
 function createContent(entry, idx) {
 	const div = document.createElement('div');
@@ -60,7 +87,7 @@ function createContent(entry, idx) {
 
 	const contentDiv = document.createElement('div');
 	contentDiv.className = 'content';
-	contentDiv.innerHTML = resolveEscapeBlocks(entry.content);
+	contentDiv.innerHTML = resolveEscapeBlocks(entry.content, "public");
 	div.appendChild(contentDiv);
 
 	const tagsP = document.createElement('p');
@@ -72,8 +99,6 @@ function createContent(entry, idx) {
 }
 
 function populateContainer(entries) {
-	const container = document.getElementById("container")
-
 	Array.from(container.children).forEach(child => {
 		if (!keepIds.includes(child.id)) child.remove();
 	});
@@ -106,9 +131,21 @@ function exitbuttoner() {
     });
 }
 
-const verbs = ["is idling around", "is not playing games", "is working on coding", "is coding on working", "is getting MAD", "is eating food", "is trying to get inspired", "is staring at wall"];
-(function main() {
-	console.log("running");
+async function loadTextToArray(fileUrl, arg) {
+	const response = await fetch(fileUrl);
+	if (!response.ok) throw new Error(`${fileUrl}: ${response.status}`);
+	const text = await response.text();
+	return (arg === "skull") ? text : text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+}
+
+async function embellishment() {
+	let skull;
+	try {skull = await loadTextToArray("funny.txt", "skull");} catch (error) {console.error("Error loading file:", error); return};
+	console.log(skull);
+	console.log("What are you looking for?")
+}
+
+(async function main() {
 	document.getElementById("entry-0").remove();
 	document.getElementById("initiate").addEventListener("click", () => {
 		document.getElementById("entry-1").remove();
@@ -118,8 +155,13 @@ const verbs = ["is idling around", "is not playing games", "is working on coding
 		}, 10)
 	});
 
-	document.getElementById("verb").innerHTML = verbs[Math.floor(Math.random()*verbs.length)];
-	document.getElementById("jlzt").addEventListener("click", () => {
-		document.getElementById("verb").innerHTML = verbs[Math.floor(Math.random()*verbs.length)];
+	let verbs;
+	try {verbs = await loadTextToArray("verbs.txt", "nah");} catch (error) {console.error("Error loading file:", error); return};
+	const randomVerb = () => {return verbs[Math.floor(Math.random() * verbs.length)]};
+	
+	document.getElementById("verb").innerHTML = randomVerb();
+	document.getElementById("jlzt").addEventListener("click", async () => {
+		document.getElementById("verb").innerHTML = randomVerb();
 	});
+	embellishment();
 })();
